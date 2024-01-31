@@ -96,6 +96,7 @@ class TrainingClient(object):
     def train(
         self,
         name: str,
+        image: str,
         namespace: Optional[str] = None,
         num_workers: int = 1,
         num_procs_per_worker: int = 1,
@@ -195,6 +196,12 @@ class TrainingClient(object):
             ],
             volume_mounts=[constants.STORAGE_INITIALIZER_VOLUME_MOUNT],
         )
+
+        base_image=constants.TRAINER_TRANSFORMER_IMAGE
+        base_image=image
+        if base_image == None:
+            base_image=constants.TRAINER_TRANSFORMER_IMAGE
+        print(f"---------->> base image: {base_image)")
 
         # create app container spec
         container_spec = utils.get_container_spec(
