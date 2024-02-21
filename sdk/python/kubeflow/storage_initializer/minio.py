@@ -1,7 +1,22 @@
 from dataclasses import dataclass, field
+import transformers
+from typing import Union
 from urllib.parse import urlparse
 from .abstract_model_provider import modelProvider
 from .abstract_dataset_provider import datasetProvider
+
+TRANSFORMER_TYPES = Union[
+    transformers.AutoModelForSequenceClassification,
+    transformers.AutoModelForTokenClassification,
+    transformers.AutoModelForQuestionAnswering,
+    transformers.AutoModelForCausalLM,
+    transformers.AutoModelForMaskedLM,
+    transformers.AutoModelForImageClassification,
+]
+
+IMAGE_PROCESSOR_TYPES = Union[
+    transformers.AutoProcessor,
+]
 
 @dataclass
 class MinioDatasetPrams:
@@ -39,7 +54,8 @@ class MinioDataset(datasetProvider):
 @dataclass
 class MinioModelParams:
     model_uri: str
-    #transformer_type: TRANSFORMER_TYPES
+    transformer_type: TRANSFORMER_TYPES
+    image_processor_type: IMAGE_PROCESSOR_TYPES
     access_token: str = None
 
     def __post_init__(self):

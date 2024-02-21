@@ -346,22 +346,24 @@ class TrainingClient(object):
             base_image=constants.TRAINER_TRANSFORMER_IMAGE
         print(f"base image:: {base_image}")
 
-        """
         # create app container spec
         container_spec = utils.get_container_spec(
             name=constants.JOB_PARAMETERS[constants.PYTORCHJOB_KIND]["container"],
-            base_image=constants.TRAINER_TRANSFORMER_IMAGE,
+            #base_image=constants.TRAINER_TRANSFORMER_IMAGE,
+            base_image=base_image,
             args=[
                 "--model_uri",
                 model_provider_parameters.model_uri,
                 "--transformer_type",
                 model_provider_parameters.transformer_type.__name__,
+                "--image_processor_type",
+                model_provider_parameters.image_processor_type.__name__,
                 "--model_dir",
                 VOLUME_PATH_MODEL,
                 "--dataset_dir",
                 VOLUME_PATH_DATASET,
-                "--dataset_name",
-                dataset_provider_parameters.repo_id,
+                #"--dataset_name",
+                #dataset_provider_parameters.repo_id,
                 "--lora_config",
                 json.dumps(train_parameters.lora_config.__dict__, cls=utils.SetEncoder),
                 "--training_parameters",
@@ -383,6 +385,7 @@ class TrainingClient(object):
             volume_mounts=[constants.STORAGE_INITIALIZER_VOLUME_MOUNT],
             resources=resources_per_worker,
         )
+        """
 
         # create worker pod spec
         worker_pod_template_spec = utils.get_pod_template_spec(
