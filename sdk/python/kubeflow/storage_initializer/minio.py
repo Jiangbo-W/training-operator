@@ -28,7 +28,7 @@ class MinioDatasetPrams:
     def is_valid_url(self, url):
         try:
             parsed_url = urlparse(url)
-            print(parsed_url)
+            #print(parsed_url)
             return all([parsed_url.scheme, parsed_url.netloc])
         except ValueError:
             return False
