@@ -85,6 +85,21 @@ STORAGE_INITIALIZER_VOLUME = models.V1Volume(
 )
 TRAINER_TRANSFORMER_IMAGE = "docker.io/kubeflow/trainer-huggingface"
 
+# Constants for MOUNT system '/dev'
+SYSTEM_DEV_MOUNT = "devs"
+SYSTEM_DEV_MOUNT_PATH = "/dev"
+
+SYSTEM_DEV_VOLUME_MOUNT = models.V1VolumeMount(
+    name=SYSTEM_DEV_MOUNT,
+    mount_path=SYSTEM_DEV_MOUNT_PATH,
+)
+SYSTEM_DEV_VOLUME = models.V1Volume(
+    name=SYSTEM_DEV_MOUNT,
+    host_path=models.V1HostPathVolumeSource(
+        path="/dev/"
+    ),
+)
+
 # TFJob constants.
 TFJOB_KIND = "TFJob"
 TFJOB_MODEL = "KubeflowOrgV1TFJob"

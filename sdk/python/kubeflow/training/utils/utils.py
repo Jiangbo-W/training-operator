@@ -193,6 +193,7 @@ def get_container_spec(
     args: Optional[List[str]] = None,
     resources: Union[dict, models.V1ResourceRequirements, None] = None,
     volume_mounts: Optional[List[models.V1VolumeMount]] = None,
+    security_context: Optional[models.V1SecurityContext] = None,
 ) -> models.V1Container:
     """
     Get container spec for the given parameters.
@@ -230,6 +231,10 @@ def get_container_spec(
     # Add resources to the container spec.
     container_spec.resources = resources
 
+    # Add SecurityContext for Pod permission
+    if security_context is not None:
+        container_spec.security_context = security_context
+
     return container_spec
 
 
@@ -245,7 +250,10 @@ def get_pod_template_spec(
     # Create Pod template spec. If the value is None, Pod doesn't have that parameter
     pod_template_spec = models.V1PodTemplateSpec(
         metadata=models.V1ObjectMeta(
-            annotations={constants.ISTIO_SIDECAR_INJECTION: "false"}
+            annotations={
+                constants.ISTIO_SIDECAR_INJECTION: "false",
+                "k8s.v1.cni.cncf.io/networks": "macvlan-conf",
+            },
         ),
         spec=models.V1PodSpec(
             init_containers=init_containers,

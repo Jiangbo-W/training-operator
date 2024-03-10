@@ -346,6 +346,24 @@ class TrainingClient(object):
             base_image=constants.TRAINER_TRANSFORMER_IMAGE
         print(f"base image:: {base_image}")
 
+        training_parameters = train_parameters.training_parameters.to_dict()
+        if training_parameters['ddp_backend'] == "ccl":
+            container_volume_mounts=[
+                constants.STORAGE_INITIALIZER_VOLUME_MOUNT,
+                constants.SYSTEM_DEV_VOLUME_MOUNT,
+            ]
+            pod_volumes=[
+                constants.STORAGE_INITIALIZER_VOLUME,
+                constants.SYSTEM_DEV_VOLUME,
+            ]
+            securitycontext=models.V1SecurityContext(
+                privileged=True,
+            )
+        else:
+            container_volume_mounts=[constants.STORAGE_INITIALIZER_VOLUME_MOUNT]
+            pod_volumes=[constants.STORAGE_INITIALIZER_VOLUME]
+            securitycontext=None
+
         # create app container spec
         container_spec = utils.get_container_spec(
             name=constants.JOB_PARAMETERS[constants.PYTORCHJOB_KIND]["container"],
@@ -369,8 +387,9 @@ class TrainingClient(object):
                 "--training_parameters",
                 json.dumps(train_parameters.training_parameters.to_dict()),
             ],
-            volume_mounts=[constants.STORAGE_INITIALIZER_VOLUME_MOUNT],
+            volume_mounts=container_volume_mounts,
             resources=resources_per_worker,
+            security_context=securitycontext,
         )
         """
         # create app container spec
@@ -391,14 +410,14 @@ class TrainingClient(object):
         worker_pod_template_spec = utils.get_pod_template_spec(
             containers=[container_spec],
             init_containers=[init_container_spec],
-            volumes=[constants.STORAGE_INITIALIZER_VOLUME],
+            volumes=pod_volumes,
         )
 
         # create master pod spec
         master_pod_template_spec = utils.get_pod_template_spec(
             containers=[container_spec],
             init_containers=[init_container_spec],
-            volumes=[constants.STORAGE_INITIALIZER_VOLUME],
+            volumes=pod_volumes,
         )
 
         job = utils.get_pytorchjob_template(
@@ -411,7 +430,7 @@ class TrainingClient(object):
         )
 
         self.create_job(job, namespace=namespace)
-        print("Success! DDP Training is running now, enjoy!")
+        print(f"Success! DDP Training with {training_parameters['ddp_backend']} is running now, enjoy!")
 
     ## The function is copied from tran(), and it is used for IPEX fine-tune Med-GIT model
     def ll_train(
