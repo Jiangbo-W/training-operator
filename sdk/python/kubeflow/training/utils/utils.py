@@ -235,6 +235,8 @@ def get_container_spec(
     if security_context is not None:
         container_spec.security_context = security_context
 
+    container_spec.image_pull_policy = "IfNotPresent"
+
     return container_spec
 
 
