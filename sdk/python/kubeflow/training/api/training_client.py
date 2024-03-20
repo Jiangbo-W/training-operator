@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import sys
+import re
+
 import multiprocessing
 import logging
 import time
@@ -19,6 +22,14 @@ import json
 from typing import Optional, Callable, Tuple, List, Dict, Any, Set, Union
 import queue
 from kubernetes import client, config, watch
+
+from livelossplot import PlotLosses
+from livelossplot.outputs import MatplotlibPlot
+from IPython.display import clear_output
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+from ipywidgets import widgets, Layout
 
 from kubeflow.training import models
 from kubeflow.training.api_client import ApiClient
@@ -1468,6 +1479,11 @@ class TrainingClient(object):
             # Create thread and queue per stream, for non-blocking iteration
             log_queue_pool = utils.get_log_queue_pool(log_streams)
 
+            liveloss = PlotLosses()
+
+            output1 = widgets.Output()
+            output2 = widgets.Output()
+
             # Iterate over every watching pods' log queue
             while True:
                 for index, log_queue in enumerate(log_queue_pool):
@@ -1486,25 +1502,32 @@ class TrainingClient(object):
                             # Print logs to the StdOut
                             #print(f"[Pod {pods[index].metadata.name}]: {logline}")
 
-                            ANSIRE = re.compile('\x1b\\[(K|.*?m)')
-                            codes = ANSIRE.findall(logline)
-                            if codes:
-                                print(logline)
-                            elif logline[0] != '\r':
-                                print(f"[Pod {pods[index].metadata.name}]: {logline}")
-                            elif logline[1:5] != "Epoch"[0:4]:
-                                print(logline)
-                            else:
-                                sys.stdout.write(logline)
+                            with output1:
+                                #display(check_metrics(model_path))
+                                ANSIRE = re.compile('\x1b\\[(K|.*?m)')
+                                codes = ANSIRE.findall(logline)
+                                if codes:
+                                    print(logline)
+                                elif logline[0] != '\r':
+                                    print(f"[Pod {pods[index].metadata.name}]: {logline}")
+                                elif logline[1:5] != "Epoch"[0:4]:
+                                    print(logline)
+                                else:
+                                    sys.stdout.write(logline)
 
-                            ## Show Training loss Plot
-                            LOSS = re.compile("Avg Loss .*?:")
-                            value = LOSS.findall(logline)
-                            if value:
-                                avg_loss = value[0]
-                                loss = float(avg_loss[8:-1])
-                                liveloss.update({'loss': loss})
-                                liveloss.send()
+                            with output2:
+                                LOSS = re.compile("Avg Loss .*?:")
+                                value = LOSS.findall(logline)
+                                if value:
+                                    avg_loss = value[0]
+                                    loss = float(avg_loss[8:-1])
+                                    liveloss.update({'loss': loss})
+                                    liveloss.send()
+
+                            two_columns = widgets.HBox([output1, output2], layout=Layout(width='90%'))
+                            display(two_columns)
+
+                            clear_output(wait=True)
 
                             # Add logs to the results dict.
                             if pods[index].metadata.name not in logs_dict:
