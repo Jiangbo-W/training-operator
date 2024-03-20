@@ -1497,6 +1497,15 @@ class TrainingClient(object):
                             else:
                                 sys.stdout.write(logline)
 
+                            ## Show Training loss Plot
+                            LOSS = re.compile("Avg Loss .*?:")
+                            value = LOSS.findall(logline)
+                            if value:
+                                avg_loss = value[0]
+                                loss = float(avg_loss[8:-1])
+                                liveloss.update({'loss': loss})
+                                liveloss.send()
+
                             # Add logs to the results dict.
                             if pods[index].metadata.name not in logs_dict:
                                 logs_dict[pods[index].metadata.name] = logline
