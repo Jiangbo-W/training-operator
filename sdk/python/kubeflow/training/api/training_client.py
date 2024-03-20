@@ -1484,7 +1484,19 @@ class TrainingClient(object):
                                 break
 
                             # Print logs to the StdOut
-                            print(f"[Pod {pods[index].metadata.name}]: {logline}")
+                            #print(f"[Pod {pods[index].metadata.name}]: {logline}")
+
+                            ANSIRE = re.compile('\x1b\\[(K|.*?m)')
+                            codes = ANSIRE.findall(logline)
+                            if codes:
+                                print(logline)
+                            elif logline[0] != '\r':
+                                print(f"[Pod {pods[index].metadata.name}]: {logline}")
+                            elif logline[1:5] != "Epoch"[0:4]:
+                                print(logline)
+                            else:
+                                sys.stdout.write(logline)
+
                             # Add logs to the results dict.
                             if pods[index].metadata.name not in logs_dict:
                                 logs_dict[pods[index].metadata.name] = logline
