@@ -1608,6 +1608,13 @@ class TrainingClient(object):
                             # Print logs to the StdOut
                             #print(f"[Pod {pods[index].metadata.name}]: {logline}")
 
+                            if (
+                                "UserWarning" in logline or "torch_pytree" in logline
+                                or "strongly recommend" in logline or "ActivityProfilerController" in logline
+                                or "warning" in logline or "WARN" in logline
+                            ):
+                                continue
+
                             with output1:
                                 #display(check_metrics(model_path))
                                 ANSIRE = re.compile('\x1b\\[(K|.*?m)')
