@@ -1231,6 +1231,112 @@ class TrainingClient(object):
                 {expected_conditions}"
         )
 
+    def wait_for_training_ready(
+        self,
+        name: str,
+        namespace: Optional[str] = None,
+        job_kind: Optional[str] = None,
+        expected_conditions: Set = {constants.JOB_CONDITION_SUCCEEDED},
+        wait_timeout: int = 600,
+        polling_interval: int = 15,
+        callback: Optional[Callable] = None,
+        timeout: int = constants.DEFAULT_TIMEOUT,
+    ) -> constants.JOB_MODELS_TYPE:
+        """Wait until Training Job reaches any of the specified conditions.
+        By default it waits for the Succeeded condition.
+
+        Args:
+            name: Name for the Job.
+            namespace: Namespace for the Job. By default namespace is taken from
+                `TrainingClient` object.
+            job_kind: Kind for the Job (e.g. `TFJob` or `PyTorchJob`). By default Job kind
+                is taken from `TrainingClient` object.
+            expected_conditions: Set of expected conditions. It must be subset of this:
+                `{"Created", "Running", "Restarting", "Succeeded", "Failed"}`
+            wait_timeout: How many seconds to wait until Job reaches one of
+                the expected conditions.
+            polling_interval: The polling interval in seconds to get Job status.
+            callback: Callback function that is invoked after Job
+                status is polled. This function takes a single argument which
+                is current Job object.
+            timeout: Kubernetes API server timeout in seconds to execute the request.
+
+        Returns:
+            object: Job object. For example: KubeflowOrgV1PyTorchJob
+
+        Raises:
+            ValueError: Invalid input parameters.
+            TimeoutError: Timeout to get Job.
+            RuntimeError: Failed to get Job or Job reaches unexpected Failed condition.
+        """
+
+        namespace = namespace or self.namespace
+        job_kind = job_kind or self.job_kind
+        maxNameLen = 48
+
+        if not expected_conditions.issubset(constants.JOB_CONDITIONS):
+            raise ValueError(
+                f"Expected conditions: {expected_conditions} must be subset of \
+                    {constants.JOB_CONDITIONS}"
+            )
+        for _ in range(round(wait_timeout / polling_interval)):
+            # We should get Job only once per cycle and check the statuses.
+            job = self.get_job(
+                name=name,
+                namespace=namespace,
+                job_kind=job_kind,
+                timeout=timeout,
+            )
+
+            # Get Job conditions.
+            conditions = self.get_job_conditions(job=job, timeout=timeout)
+            if len(conditions) > 0:
+                status_logger(
+                    name,
+                    conditions[-1].type,
+                    conditions[-1].last_transition_time,
+                )
+
+            # Execute callback function is it is set.
+            if callback:
+                callback(job)
+
+            # Raise an exception if Job is Failed and Failed is not expected condition.
+            if (
+                constants.JOB_CONDITION_FAILED not in conditions
+                and utils.has_condition(conditions, constants.JOB_CONDITION_FAILED)
+            ):
+                raise RuntimeError(
+                    f"{job_kind} {namespace}/{name} is Failed. "
+                    f"{job_kind} conditions: {job.status.conditions}"
+                )
+
+            clear_output(wait=True)
+            pods = self.get_job_pods(name, namespace)
+            if pods:
+                # Job was created
+                allPodRunning = True
+                print('{:{width}}{:10}\t{:15}\t\t{}'.format('NAME', "STATUS", "IP", "NODE", width=maxNameLen))
+                for pod in pods:
+                    if pod.status is None:
+                        continue
+
+                    pading_len = len(pod.metadata.name) + 8
+                    maxNameLen = pading_len if pading_len > maxNameLen else maxNameLen
+                    print("{}\t{}\t\t{:15}\t\t{}".format(pod.metadata.name, pod.status.phase, str(pod.status.pod_ip), str(pod.spec.node_name)))
+                    if pod.status.phase != "Running":
+                        allPodRunning = False
+
+                if allPodRunning:
+                    return job
+
+            time.sleep(polling_interval)
+
+        raise TimeoutError(
+            f"Timeout waiting for {job_kind}: {namespace}/{name} to reach expected conditions: \
+                {expected_conditions}"
+        )
+
     def get_job_pods(
         self,
         name: str,
@@ -1379,7 +1485,7 @@ class TrainingClient(object):
             pod_names.append(pod.metadata.name)
         return pod_names
 
-    def get_job_logs(
+    def show_training_logs_and_loss(
         self,
         name: str,
         namespace: Optional[str] = None,
@@ -1528,6 +1634,176 @@ class TrainingClient(object):
                             display(two_columns)
 
                             clear_output(wait=True)
+
+                            # Add logs to the results dict.
+                            if pods[index].metadata.name not in logs_dict:
+                                logs_dict[pods[index].metadata.name] = logline
+                            else:
+                                logs_dict[pods[index].metadata.name] += logline
+                        except queue.Empty:
+                            break
+                if all(finished):
+                    break
+        elif pods:
+            for pod in pods:
+                if (
+                    pod.status is not None
+                    and pod.status.phase != constants.POD_PHASE_PENDING
+                ):
+                    try:
+                        pod_logs = self.core_api.read_namespaced_pod_log(
+                            name=pod.metadata.name,
+                            namespace=namespace,
+                            container=constants.JOB_PARAMETERS[job_kind]["container"],
+                        )
+                        logs_dict[pod.metadata.name] = pod_logs
+                    except Exception:
+                        raise RuntimeError(
+                            f"Failed to read logs for pod {namespace}/{pod.metadata.name}"
+                        )
+        # If verbose is set, return Kubernetes events for Job and pods.
+        if verbose:
+            job = self.get_job(name=name, namespace=namespace)
+            events = self.core_api.list_namespaced_event(namespace=namespace)
+
+            # Get events for the Job and Job's pods.
+            for event in events.items:
+                utils.add_event_to_dict(
+                    events_dict=events_dict,
+                    event=event,
+                    object_kind=job_kind,
+                    object_name=name,
+                    object_creation_timestamp=job.metadata.creation_timestamp,
+                )
+                if pods:
+                    for pod in pods:
+                        utils.add_event_to_dict(
+                            events_dict=events_dict,
+                            event=event,
+                            object_kind=constants.POD_KIND,
+                            object_name=pod.metadata.name,
+                            object_creation_timestamp=pod.metadata.creation_timestamp,
+                        )
+
+        return logs_dict, events_dict
+
+    def get_job_logs(
+        self,
+        name: str,
+        namespace: Optional[str] = None,
+        job_kind: Optional[str] = None,
+        is_master: bool = True,
+        replica_type: Optional[str] = None,
+        replica_index: Optional[int] = None,
+        follow: bool = False,
+        timeout: int = constants.DEFAULT_TIMEOUT,
+        verbose: bool = False,
+    ) -> Tuple[Dict[str, str], Dict[str, List[str]]]:
+        """Get the logs for every Training Job pod. By default it returns logs from
+        the `master` pod. Logs are returned in this format: { "pod-name": "Log data" }.
+
+        Args:
+            name: Name for the Job.
+            namespace: Namespace for the Job. By default namespace is taken from
+                `TrainingClient` object.
+            job_kind: Kind for the Job (e.g. `TFJob` or `PyTorchJob`). By default Job kind
+                is taken from `TrainingClient` object.
+            is_master: Whether to get logs for the pod with the label
+                `training.kubeflow.org/job-role: master`.
+            replica_type: Optional, type of the Job replica.
+                For TFJob one of `chief`, `ps`, or `worker`.
+
+                For PyTorchJob one of `master` or `worker`.
+
+                For MXJob one of `scheduler`, `server`, or `worker`.
+
+                For XGBoostJob one of `master` or `worker`.
+
+                For MPIJob one of `launcher` or `worker`.
+
+                For PaddleJob one of `master` or `worker`.
+            replica_index: Optional, index for the Job replica.
+            container: Pod container to get the logs.
+            follow: Whether to follow the log stream of the pod and print logs to StdOut.
+            timeout: Optional, Kubernetes API server timeout in seconds
+                to execute the request.
+            verbose: Whether to get Kubernetes events for Job and corresponding pods.
+                If you need to get events from all PyTorchJob's Pods, set `isMaster = False`.
+
+        Returns:
+            Dict[str, str]: A dictionary in which the keys are pod names and the
+            values are the corresponding logs.
+            Dict[str, str]: A dictionary in which the keys are object kind and name, and the
+            values are list of the corresponding Kubernetes events with their timestamps. This
+            value is returned only if `verbose = True`. For example:
+            ```json
+            {
+              "PyTorchJob train-mnist": [
+                "2024-01-05 22:58:20 Created pod: train-mnist-worker-0"
+              ],
+              "Pod train-mnist-worker-0": [
+                "2024-01-05 22:58:20 Created container init-pytorch"
+              ]
+            }
+            ```
+
+        Raises:
+            ValueError: Job replica type is invalid.
+            TimeoutError: Timeout to get Job or Job's pods
+            RuntimeError: Failed to get Job or Job's pods.
+        """
+
+        namespace = namespace or self.namespace
+        job_kind = job_kind or self.job_kind
+
+        pods = self.get_job_pods(
+            name=name,
+            namespace=namespace,
+            is_master=is_master,
+            replica_type=replica_type,
+            replica_index=replica_index,
+            timeout=timeout,
+        )
+
+        logs_dict = {}
+        events_dict = {}
+        if pods and follow:
+            log_streams = []
+            for pod in pods:
+                if (
+                    pod.status is not None
+                    and pod.status.phase != constants.POD_PHASE_PENDING
+                ):
+                    log_streams.append(
+                        watch.Watch().stream(
+                            self.core_api.read_namespaced_pod_log,
+                            name=pod.metadata.name,
+                            namespace=namespace,
+                            container=constants.JOB_PARAMETERS[job_kind]["container"],
+                        )
+                    )
+            finished = [False for _ in log_streams]
+
+            # Create thread and queue per stream, for non-blocking iteration
+            log_queue_pool = utils.get_log_queue_pool(log_streams)
+
+            # Iterate over every watching pods' log queue
+            while True:
+                for index, log_queue in enumerate(log_queue_pool):
+                    if all(finished):
+                        break
+                    if finished[index]:
+                        continue
+                    # grouping the every 50 log lines of the same pod
+                    for _ in range(50):
+                        try:
+                            logline = log_queue.get(timeout=1)
+                            if logline is None:
+                                finished[index] = True
+                                break
+
+                            # Print logs to the StdOut
+                            print(f"[Pod {pods[index].metadata.name}]: {logline}")
 
                             # Add logs to the results dict.
                             if pods[index].metadata.name not in logs_dict:
